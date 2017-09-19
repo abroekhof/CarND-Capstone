@@ -52,8 +52,9 @@ class WaypointUpdater(object):
             if curr_dist < min_dist:
                 start_idx = idx
                 min_dist = curr_dist
+        
         waypoints = []
-        while len(waypoints) < 200:
+        while len(waypoints) < LOOKAHEAD_WPS:
             waypoints.append(self.all_waypoints[start_idx % len(self.all_waypoints)])
             start_idx += 1
 
