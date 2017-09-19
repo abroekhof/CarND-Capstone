@@ -3,6 +3,8 @@
 import rospy
 from geometry_msgs.msg import PoseStamped
 from styx_msgs.msg import Lane, Waypoint
+import tf
+import angles
 
 import math
 
@@ -42,20 +44,35 @@ class WaypointUpdater(object):
         rospy.spin()
 
     def pose_cb(self, msg):
-        dl = lambda wp: math.sqrt(
+        calc_distance = lambda wp: math.sqrt(
             (wp.pose.position.x-msg.pose.position.x)**2
             + (wp.pose.position.y-msg.pose.position.y)**2
             + (wp.pose.position.z-msg.pose.position.z)**2)
+
+        # TODO(abroekhof): verify that this produces angles in the correct
+        # reference frame.
+        calc_angle = lambda wp: math.atan2(
+            wp.pose.position.y-msg.pose.position.y, 
+            wp.pose.position.x-msg.pose.position.x)
+
+        (_, _, car_yaw) = tf.getYaw(msg.pose.orientation)
+
         min_dist = float("inf")
         for idx, waypoint in enumerate(self.all_waypoints):
-            curr_dist = dl(waypoint)
-            if curr_dist < min_dist:
-                start_idx = idx
-                min_dist = curr_dist
-        
+            wp_angle = calc_angle(waypoint)
+            # Make sure that the car is generally pointed towards the waypoint.
+            if abs(angles.shortest_angular_distance(car_yaw, wp_angle)) < math.pi/4:
+                curr_dist = calc_distance(waypoint)
+                if curr_dist < min_dist:
+                    start_idx = idx
+                    min_dist = curr_dist
+
         waypoints = []
-        while len(waypoints) < LOOKAHEAD_WPS:
-            waypoints.append(self.all_waypoints[start_idx % len(self.all_waypoints)])
+        all_waypoints_len = len(self.all_waypoints)
+        # TODO(abroekhof): Does final_waypoints need to wrap around, or does 
+        # the car stop at the end?
+        while len(waypoints) < LOOKAHEAD_WPS and start_idx < all_waypoints_len:
+            waypoints.append(self.all_waypoints[start_idx])
             start_idx += 1
 
         lane = Lane()
