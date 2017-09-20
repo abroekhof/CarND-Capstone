@@ -55,7 +55,7 @@ class WaypointUpdater(object):
             wp.pose.position.y-msg.pose.position.y, 
             wp.pose.position.x-msg.pose.position.x)
 
-        (_, _, car_yaw) = tf.getYaw(msg.pose.orientation)
+        (_, _, car_yaw) = tf.transformations.euler_from_quaternion(msg.pose.orientation)
 
         min_dist = float("inf")
         for idx, waypoint in enumerate(self.all_waypoints):
