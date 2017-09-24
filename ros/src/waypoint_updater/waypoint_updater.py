@@ -3,6 +3,8 @@
 import rospy
 from geometry_msgs.msg import PoseStamped
 from styx_msgs.msg import Lane, Waypoint
+import tf
+import angles
 
 import math
 
@@ -37,16 +39,54 @@ class WaypointUpdater(object):
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         # TODO: Add other member variables you need below
+        self.all_waypoints = []
 
         rospy.spin()
 
     def pose_cb(self, msg):
-        # TODO: Implement
-        pass
+        calc_distance = lambda wp: math.sqrt(
+            (wp.pose.pose.position.x-msg.pose.position.x)**2
+            + (wp.pose.pose.position.y-msg.pose.position.y)**2
+            + (wp.pose.pose.position.z-msg.pose.position.z)**2)
 
-    def waypoints_cb(self, waypoints):
-        # TODO: Implement
-        pass
+        # TODO(abroekhof): verify that this produces angles in the correct
+        # reference frame.
+        calc_angle = lambda wp: math.atan2(
+            wp.pose.pose.position.y-msg.pose.position.y,
+            wp.pose.pose.position.x-msg.pose.position.x)
+
+        qtrn = msg.pose.orientation
+        (_, _, car_yaw) = tf.transformations.euler_from_quaternion([qtrn.x, qtrn.y, qtrn.z, qtrn.w])
+
+        min_dist = float("inf")
+        start_idx = 0
+        for idx, waypoint in enumerate(self.all_waypoints):
+            wp_angle = calc_angle(waypoint)
+            # Make sure that the car is generally pointed towards the waypoint.
+            if abs(angles.shortest_angular_distance(car_yaw, wp_angle)) < math.pi/4:
+                curr_dist = calc_distance(waypoint)
+                if curr_dist < min_dist:
+                    start_idx = idx
+                    min_dist = curr_dist
+
+        waypoints = []
+        all_waypoints_len = len(self.all_waypoints)
+        # TODO(abroekhof): Does final_waypoints need to wrap around, or does 
+        # the car stop at the end?
+        while len(waypoints) < LOOKAHEAD_WPS and start_idx < all_waypoints_len:
+            waypoints.append(self.all_waypoints[start_idx])
+            start_idx += 1
+
+        lane = Lane()
+        lane.header.frame_id = '/car'
+        lane.header.stamp = rospy.Time(0)
+        lane.waypoints = waypoints
+        self.final_waypoints_pub.publish(lane)
+
+    def waypoints_cb(self, lane):
+        self.all_waypoints = []
+        for waypoint in lane.waypoints:
+            self.all_waypoints.append(waypoint)
 
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
