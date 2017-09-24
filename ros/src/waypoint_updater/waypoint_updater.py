@@ -45,19 +45,21 @@ class WaypointUpdater(object):
 
     def pose_cb(self, msg):
         calc_distance = lambda wp: math.sqrt(
-            (wp.pose.position.x-msg.pose.position.x)**2
-            + (wp.pose.position.y-msg.pose.position.y)**2
-            + (wp.pose.position.z-msg.pose.position.z)**2)
+            (wp.pose.pose.position.x-msg.pose.position.x)**2
+            + (wp.pose.pose.position.y-msg.pose.position.y)**2
+            + (wp.pose.pose.position.z-msg.pose.position.z)**2)
 
         # TODO(abroekhof): verify that this produces angles in the correct
         # reference frame.
         calc_angle = lambda wp: math.atan2(
-            wp.pose.position.y-msg.pose.position.y, 
-            wp.pose.position.x-msg.pose.position.x)
+            wp.pose.pose.position.y-msg.pose.position.y,
+            wp.pose.pose.position.x-msg.pose.position.x)
 
-        (_, _, car_yaw) = tf.transformations.euler_from_quaternion(msg.pose.orientation)
+        qtrn = msg.pose.orientation
+        (_, _, car_yaw) = tf.transformations.euler_from_quaternion([qtrn.x, qtrn.y, qtrn.z, qtrn.w])
 
         min_dist = float("inf")
+        start_idx = 0
         for idx, waypoint in enumerate(self.all_waypoints):
             wp_angle = calc_angle(waypoint)
             # Make sure that the car is generally pointed towards the waypoint.
@@ -81,9 +83,9 @@ class WaypointUpdater(object):
         lane.waypoints = waypoints
         self.final_waypoints_pub.publish(lane)
 
-    def waypoints_cb(self, waypoints):
-        self.all_waypoints.clear()
-        for waypoint in waypoints:
+    def waypoints_cb(self, lane):
+        self.all_waypoints = []
+        for waypoint in lane.waypoints:
             self.all_waypoints.append(waypoint)
 
     def traffic_cb(self, msg):
