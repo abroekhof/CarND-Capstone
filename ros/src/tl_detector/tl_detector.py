@@ -10,6 +10,9 @@ from light_classification.tl_classifier import TLClassifier
 import tf
 import cv2
 import yaml
+import math
+import tf.transformations
+import angles
 
 STATE_COUNT_THRESHOLD = 3
 
@@ -49,6 +52,11 @@ class TLDetector(object):
         self.last_wp = -1
         self.state_count = 0
 
+        # copied from sim_traffic_light_config.yaml for testing only
+        self.intersection_coords = [[1148.56, 1184.65], [1559.2, 1158.43], [2122.14, 1526.79],
+                                    [2175.237, 1795.71], [1493.29, 2947.67], [821.96, 2905.8],
+                                    [161.76, 2303.82], [351.84, 1574.65]]
+        
         rospy.spin()
 
     def pose_cb(self, msg):
@@ -72,6 +80,18 @@ class TLDetector(object):
         self.camera_image = msg
         light_wp, state = self.process_traffic_lights()
 
+        for coord in self.intersection_coords:
+            d = math.sqrt((coord[0] - self.pose.pose.position.x)**2 + (coord[1] - self.pose.pose.position.y)**2)
+            theta = math.atan2((coord[1] - self.pose.pose.position.y), (coord[0] - self.pose.pose.position.x))
+            q = (self.pose.pose.orientation.x, self.pose.pose.orientation.y,
+                 self.pose.pose.orientation.z, self.pose.pose.orientation.w)
+            _, _, yaw = tf.transformations.euler_from_quaternion(q)
+            if d < 100.0 and abs(angles.shortest_angular_distance(theta, yaw)) < math.pi/4:
+                rospy.loginfo("pose.x %f pose.y %f approaching intersection .x %f .y %f distance %f",
+                              self.pose.pose.position.x, self.pose.pose.position.y,
+                              coord[0], coord[1], d)
+
+        
         '''
         Publish upcoming red lights at camera frequency.
         Each predicted state has to occur `STATE_COUNT_THRESHOLD` number
