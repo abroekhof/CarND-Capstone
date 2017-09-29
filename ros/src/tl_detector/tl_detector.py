@@ -63,6 +63,7 @@ class TLDetector(object):
         self.pose = msg
 
     def waypoints_cb(self, waypoints):
+        rospy.loginfo("tl got waypoints None = %s", waypoints == None)
         self.waypoints = waypoints
 
     def traffic_cb(self, msg):
@@ -79,17 +80,6 @@ class TLDetector(object):
         self.has_image = True
         self.camera_image = msg
         light_wp, state = self.process_traffic_lights()
-
-        for coord in self.intersection_coords:
-            d = math.sqrt((coord[0] - self.pose.pose.position.x)**2 + (coord[1] - self.pose.pose.position.y)**2)
-            theta = math.atan2((coord[1] - self.pose.pose.position.y), (coord[0] - self.pose.pose.position.x))
-            q = (self.pose.pose.orientation.x, self.pose.pose.orientation.y,
-                 self.pose.pose.orientation.z, self.pose.pose.orientation.w)
-            _, _, yaw = tf.transformations.euler_from_quaternion(q)
-            if d < 100.0 and abs(angles.shortest_angular_distance(theta, yaw)) < math.pi/4:
-                rospy.loginfo("pose.x %f pose.y %f approaching intersection .x %f .y %f distance %f",
-                              self.pose.pose.position.x, self.pose.pose.position.y,
-                              coord[0], coord[1], d)
 
         
         '''
@@ -120,8 +110,30 @@ class TLDetector(object):
             int: index of the closest waypoint in self.waypoints
 
         """
-        #TODO implement
-        return 0
+
+        if pose == None or self.waypoints == None:
+            return -1
+        
+        # find the waypoint index
+        q = (pose.orientation.x, pose.orientation.y,
+             pose.orientation.z, pose.orientation.w)
+        _, _, yaw = tf.transformations.euler_from_quaternion(q)
+                
+        idx = -1
+        min_dist = 1e9
+        for i in range(len(self.waypoints.waypoints)):
+            pose_x = pose.position.x
+            pose_y = pose.position.y
+            wp_x = self.waypoints.waypoints[i].pose.pose.position.x
+            wp_y = self.waypoints.waypoints[i].pose.pose.position.y
+            d = math.sqrt((pose_x - wp_x)**2 + (pose_y - wp_y)**2)
+            if d < min_dist:
+                # make sure the waypoint is in the direction of vehicle yaw
+                theta = math.atan2(wp_y - pose_y, wp_x - pose_x)
+                if abs(angles.shortest_angular_distance(theta, yaw)) < math.pi/4:
+                    idx = i
+                    min_dist = d
+        return idx
 
 
     def project_to_image_plane(self, point_in_world):
@@ -200,11 +212,46 @@ class TLDetector(object):
             car_position = self.get_closest_waypoint(self.pose.pose)
 
         #TODO find the closest visible traffic light (if one exists)
+        if self.pose == None or self.waypoints == None:
+            rospy.loginfo("pose or waypoints is None")
+        else:
+            for coord in self.intersection_coords:
+                d = math.sqrt((coord[0] - self.pose.pose.position.x)**2 + (coord[1] - self.pose.pose.position.y)**2)
+                theta = math.atan2((coord[1] - self.pose.pose.position.y), (coord[0] - self.pose.pose.position.x))
+                q = (self.pose.pose.orientation.x, self.pose.pose.orientation.y,
+                     self.pose.pose.orientation.z, self.pose.pose.orientation.w)
+                _, _, yaw = tf.transformations.euler_from_quaternion(q)
+                if d < 50.0 and abs(angles.shortest_angular_distance(theta, yaw)) < math.pi/4:
+                    rospy.loginfo("pose.x %f pose.y %f approaching intersection .x %f .y %f distance %f",
+                                  self.pose.pose.position.x, self.pose.pose.position.y,
+                                  coord[0], coord[1], d)
+
+                    # find the waypoint closest to the signal and with index after car
+                    best_wp = -1
+                    min_dist = 1e9
+                    i = 0
+                    decreasing = True
+                    while decreasing:
+                        idx = (car_position + i) % len(self.waypoints.waypoints)
+                        wp_x = self.waypoints.waypoints[idx].pose.pose.position.x
+                        wp_y = self.waypoints.waypoints[idx].pose.pose.position.y
+                        d = math.sqrt((coord[0] - wp_x)**2 + (coord[1] - wp_y)**2)
+                        if d < min_dist:
+                            best_wp = idx
+                            min_dist = d
+                        else:
+                            decreasing = False
+                        i = i + 1
+                        
+                    if best_wp >= 0:
+                        #rospy.loginfo("closest waypoint idx %d distance %f i=%d", best_wp, min_dist, i)
+                        self.upcoming_red_light_pub.publish(best_wp)
+
 
         if light:
             state = self.get_light_state(light)
             return light_wp, state
-        self.waypoints = None
+        #self.waypoints = None
         return -1, TrafficLight.UNKNOWN
 
 if __name__ == '__main__':

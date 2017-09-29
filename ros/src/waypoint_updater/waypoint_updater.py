@@ -41,6 +41,7 @@ class WaypointUpdater(object):
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         # Add other member variables you need below
+        self.pose = None
         self.base_lane = None
         self.traffic_wp = None
         self.obstacle_wp = None
@@ -52,6 +53,7 @@ class WaypointUpdater(object):
     def pose_cb(self, msg):
         #rospy.loginfo("pose_cb timestamp %s x=%d y=%d z=%d", msg.header.stamp, msg.pose.position.x,
         #              msg.pose.position.y, msg.pose.position.z)
+        self.pose = msg.pose
         if self.base_lane != None:
             quaternion = (msg.pose.orientation.x, msg.pose.orientation.y,
                           msg.pose.orientation.z, msg.pose.orientation.w)
@@ -94,15 +96,33 @@ class WaypointUpdater(object):
                             #   of the previous waypoint...for now, starting where we left off should at least
                             #   eliminate a lot of atan2 calls
 
+            wp_last = -1
             if wp_start >= 0:
                 for wp_idx in range(LOOKAHEAD_WPS):
                     idx = (wp_start + wp_idx) % len(self.base_lane.waypoints)
                     pub_waypoints.append(self.base_lane.waypoints[idx])
+                    wp_last = idx
                 self.wp_start_q = wp_start
                 # Add velocity command to waypoints
                 # TESTING
                 for wp_cnt in range(len(pub_waypoints)):
                     self.set_waypoint_velocity(pub_waypoints, wp_cnt, 20.0)
+
+                # if pub_waypoints includes a controlled speed section (approaching traffic light) then
+                #   override the velocity
+                # rate of deceleration per unit of distance depends on current speed
+                rate = 1.0  # TEMP
+                if self.traffic_wp >= 0 and self.traffic_wp >= wp_start and self.traffic_wp <= wp_last:
+                    idx = self.traffic_wp - wp_start  # index in pub_waypoints
+                    rospy.loginfo("brake stop pub_wp %d (wp %d)", idx, self.traffic_wp)
+                    v = 0  # final v is 0                    
+                    self.set_waypoint_velocity(pub_waypoints, idx, 0.0)  # stopped
+                    for j in range(idx, 0, -1):
+                        dist = self.distance(pub_waypoints, j, j-1)
+                        v = v + (dist * rate)
+                        rospy.loginfo("brake velocity %d set to %f", j-1, v)
+                        self.set_waypoint_velocity(pub_waypoints, j-1, v)
+                    
                 l = Lane()
                 l.header.seq = self.seqnum
                 self.seqnum = self.seqnum + 1
@@ -124,6 +144,13 @@ class WaypointUpdater(object):
     def traffic_cb(self, msg):
         # Callback for /traffic_waypoint message.
         self.traffic_wp = msg.data
+        if self.pose and self.traffic_wp >= 0:
+            pose_x = self.pose.position.x
+            pose_y = self.pose.position.y
+            tl_x = self.base_lane.waypoints[self.traffic_wp].pose.pose.position.x
+            tl_y = self.base_lane.waypoints[self.traffic_wp].pose.pose.position.y
+            d = math.sqrt((pose_x - tl_x)**2 + (pose_y - tl_y)**2)
+            rospy.loginfo("traffic control at waypoint %d distance %f", self.traffic_wp, d)
         pass
 
     def obstacle_cb(self, msg):
