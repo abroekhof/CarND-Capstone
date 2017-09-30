@@ -43,10 +43,13 @@ class WaypointUpdater(object):
         # Add other member variables you need below
         self.pose = None
         self.base_lane = None
-        self.traffic_wp = None
+        self.traffic_wp = -1
         self.obstacle_wp = None
         self.seqnum = 0
-        self.wp_start_q = -1
+        self.car_wp_q = -1
+        self.plan_waypoints = []
+        self.plan_wp_start = 0
+        self.last_traffic_wp_planned = -1
 
         rospy.spin()
 
@@ -73,13 +76,15 @@ class WaypointUpdater(object):
             pub_waypoints = []
             wp_start = -1
             min_dist = 1e9
+            dist_q = 1e9
+            state = 0  # no progress finding waypoint
             if len(self.base_lane.waypoints) > 1:
                 # find the first waypoint in front of the vehicle,
                 #   then take a sequence of LOOKAHEAD_WPS waypoints
                 for i in range(len(self.base_lane.waypoints)):
                     wp_idx = i
-                    if self.wp_start_q >= 0:
-                        wp_idx = (self.wp_start_q + i) % len(self.base_lane.waypoints)                    
+                    if self.car_wp_q >= 0:
+                        wp_idx = (self.car_wp_q + i) % len(self.base_lane.waypoints)                    
                     wp = self.base_lane.waypoints[wp_idx]
                     wp_x = wp.pose.pose.position.x
                     wp_y = wp.pose.pose.position.y
@@ -88,58 +93,59 @@ class WaypointUpdater(object):
                         theta = math.atan2(wp_y - veh_y, wp_x - veh_x)
                         # make sure the waypoint is in front of the car
                         if abs(angles.shortest_angular_distance(theta, veh_yaw)) < math.pi/4.0:
-                            rospy.loginfo("wp_x %f wp_y %f veh_x %f veh_y %f dist %f theta %f yaw %f",
-                                          wp_x, wp_y, veh_x, veh_y, veh_to_wp_dist, theta, veh_yaw)
+                            state = 1  # found correctly oriented waypoint
                             min_dist = veh_to_wp_dist
                             wp_start = wp_idx
                             # we should be able to stop iterating because the next waypoint should be in front
                             #   of the previous waypoint...for now, starting where we left off should at least
                             #   eliminate a lot of atan2 calls
+                    if veh_to_wp_dist > dist_q and state == 1:
+                        state = 2  # wp getting farther away from car
+                        break;
+                    dist_q = veh_to_wp_dist
 
-            wp_last = -1
             if wp_start >= 0:
-                for wp_idx in range(LOOKAHEAD_WPS):
-                    idx = (wp_start + wp_idx) % len(self.base_lane.waypoints)
-                    pub_waypoints.append(self.base_lane.waypoints[idx])
-                    wp_last = idx
-                self.wp_start_q = wp_start
-                # Add velocity command to waypoints
-                # TESTING
-                for wp_cnt in range(len(pub_waypoints)):
-                    self.set_waypoint_velocity(pub_waypoints, wp_cnt, 20.0)
+                self.car_wp_q = wp_start
+                rospy.loginfo("Car waypoint is %d state %d plan_wp_start %d wp_start %d",
+                              self.car_wp_q, state, self.plan_wp_start, wp_start)
 
-                # if pub_waypoints includes a controlled speed section (approaching traffic light) then
-                #   override the velocity
-                # rate of deceleration per unit of distance depends on current speed
-                if self.traffic_wp:
-                    rospy.loginfo("wp_start %d traffic_wp %d wp_last %d", wp_start, self.traffic_wp, wp_last)
+                if len(self.plan_waypoints) > 0:
+                    # update the plan with new waypoints
+                    #  - remove passed waypoints
+                    remove_cnt = (wp_start - self.plan_wp_start) % len(self.base_lane.waypoints)
+                    for i in range(remove_cnt):
+                        self.plan_waypoints.pop(0)
+                    self.plan_wp_start = wp_start
+                    wp_idx = wp_start + len(self.plan_waypoints) - 1
+                    add_cnt = LOOKAHEAD_WPS - len(self.plan_waypoints)
+                    for j in range(add_cnt):
+                        idx = (wp_idx + j) % len(self.base_lane.waypoints)
+                        wp = self.base_lane.waypoints[idx]
+                        self.plan_waypoints.append(wp)
                 else:
-                    rospy.loginfo("wp_start %d no traffic_wp", wp_start)
-                rate = 0.25  # TEMP
-                if self.traffic_wp >= 0 and self.traffic_wp >= wp_start and self.traffic_wp <= wp_last:
-                    idx = self.traffic_wp - wp_start  # index in pub_waypoints
-                    rospy.loginfo("brake stop pub_wp %d (wp %d)", idx, self.traffic_wp)
-                    v = 0  # final v is 0                    
-                    for j in range(idx, 0, -1):
-                        dist = math.sqrt((pub_waypoints[j].pose.pose.position.x -
-                                          pub_waypoints[j-1].pose.pose.position.x)**2 +
-                                         (pub_waypoints[j].pose.pose.position.y -
-                                          pub_waypoints[j-1].pose.pose.position.y)**2)
-                        v = v + (dist * rate)
-                        if v < 20.0:
-                            rospy.loginfo("brake velocity %d set to %f", j-1, v)
-                            self.set_waypoint_velocity(pub_waypoints, j-1, v)
-                    for j in range(idx, len(pub_waypoints)):
-                        self.set_waypoint_velocity(pub_waypoints, j, 0.0)
-                    # TEMP!!
-                    for j in range(len(pub_waypoints)):
-                        self.set_waypoint_velocity(pub_waypoints, j, 0.0)
+                    self.plan_wp_start = wp_start
+                    for wp_idx in range(LOOKAHEAD_WPS):
+                        idx = (wp_start + wp_idx) % len(self.base_lane.waypoints)
+                        wp = self.base_lane.waypoints[idx]
+                        self.plan_waypoints.append(wp)
+
+                wp_last = wp_start + len(self.plan_waypoints) - 1
+                
+                # Add linear velocity to waypoints
+                for i in range(len(self.plan_waypoints)):
+                    self.set_waypoint_velocity(self.plan_waypoints, i, 20.0)
+
+                # when the car enters scope of a traffic light, plan the velocity to decelerate
+                #   only do this once per light unless the light state changes
+                if self.traffic_wp >= 0 and self.traffic_wp != self.last_traffic_wp_planned:
+                    rospy.loginfo("car is at wp %d car should stop at wp %d", self.car_wp_q, self.traffic_wp)
+                    self.last_traffic_wp_planned = self.traffic_wp
                     
                 l = Lane()
                 l.header.seq = self.seqnum
                 self.seqnum = self.seqnum + 1
                 l.header.stamp = rospy.get_rostime()
-                l.waypoints = pub_waypoints
+                l.waypoints = self.plan_waypoints
                 self.final_waypoints_pub.publish(l)
                             
             rospy.loginfo("wp_start %d min_dist %f wp.x %f pose.x %f veh_yaw %f",
@@ -155,6 +161,7 @@ class WaypointUpdater(object):
 
     def traffic_cb(self, msg):
         # Callback for /traffic_waypoint message.
+        rospy.loginfo("traffic_cb wp = %d", msg.data)
         self.traffic_wp = msg.data
         if self.pose and self.traffic_wp >= 0:
             pose_x = self.pose.position.x

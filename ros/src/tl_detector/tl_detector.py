@@ -245,11 +245,15 @@ class TLDetector(object):
                         
                     if best_wp >= 0:
                         #rospy.loginfo("closest waypoint idx %d distance %f i=%d", best_wp, min_dist, i)
-                        self.upcoming_red_light_pub.publish(best_wp)
+                        light = self.waypoints.waypoints[best_wp]
+                        light_wp = best_wp
 
 
         if light:
             state = self.get_light_state(light)
+
+            state = TrafficLight.RED
+            
             return light_wp, state
         #self.waypoints = None
         return -1, TrafficLight.UNKNOWN
