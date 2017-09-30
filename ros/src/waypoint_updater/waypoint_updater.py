@@ -111,17 +111,29 @@ class WaypointUpdater(object):
                 # if pub_waypoints includes a controlled speed section (approaching traffic light) then
                 #   override the velocity
                 # rate of deceleration per unit of distance depends on current speed
-                rate = 1.0  # TEMP
+                if self.traffic_wp:
+                    rospy.loginfo("wp_start %d traffic_wp %d wp_last %d", wp_start, self.traffic_wp, wp_last)
+                else:
+                    rospy.loginfo("wp_start %d no traffic_wp", wp_start)
+                rate = 0.25  # TEMP
                 if self.traffic_wp >= 0 and self.traffic_wp >= wp_start and self.traffic_wp <= wp_last:
                     idx = self.traffic_wp - wp_start  # index in pub_waypoints
                     rospy.loginfo("brake stop pub_wp %d (wp %d)", idx, self.traffic_wp)
                     v = 0  # final v is 0                    
-                    self.set_waypoint_velocity(pub_waypoints, idx, 0.0)  # stopped
                     for j in range(idx, 0, -1):
-                        dist = self.distance(pub_waypoints, j, j-1)
+                        dist = math.sqrt((pub_waypoints[j].pose.pose.position.x -
+                                          pub_waypoints[j-1].pose.pose.position.x)**2 +
+                                         (pub_waypoints[j].pose.pose.position.y -
+                                          pub_waypoints[j-1].pose.pose.position.y)**2)
                         v = v + (dist * rate)
-                        rospy.loginfo("brake velocity %d set to %f", j-1, v)
-                        self.set_waypoint_velocity(pub_waypoints, j-1, v)
+                        if v < 20.0:
+                            rospy.loginfo("brake velocity %d set to %f", j-1, v)
+                            self.set_waypoint_velocity(pub_waypoints, j-1, v)
+                    for j in range(idx, len(pub_waypoints)):
+                        self.set_waypoint_velocity(pub_waypoints, j, 0.0)
+                    # TEMP!!
+                    for j in range(len(pub_waypoints)):
+                        self.set_waypoint_velocity(pub_waypoints, j, 0.0)
                     
                 l = Lane()
                 l.header.seq = self.seqnum
@@ -130,9 +142,9 @@ class WaypointUpdater(object):
                 l.waypoints = pub_waypoints
                 self.final_waypoints_pub.publish(l)
                             
-            rospy.loginfo("wp_start %d min_dist %f wp.x %f pose.x %f veh_yaw %f wp_cnt %d",
+            rospy.loginfo("wp_start %d min_dist %f wp.x %f pose.x %f veh_yaw %f",
                           wp_start, min_dist, self.base_lane.waypoints[wp_start].pose.pose.position.x,
-                          msg.pose.position.x, veh_yaw, wp_cnt)
+                          msg.pose.position.x, veh_yaw)
 
         pass
 
