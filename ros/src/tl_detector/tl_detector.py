@@ -202,7 +202,7 @@ class TLDetector(object):
         pix_y = int(fy * img_y / img_z + cy)
 
         # Calculate the bounding box size to encapsulate the traffic light
-        traffic_light_size = 4
+        traffic_light_size = 6  # Intentionally oversize for better coverage
         bb_width = int(math.sqrt(fx*fy) * traffic_light_size / img_z)
 
         return pix_x, pix_y, bb_width
