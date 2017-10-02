@@ -223,13 +223,13 @@ class TLDetector(object):
             return TrafficLight.UNKNOWN
 
         if light.state != TrafficLight.UNKNOWN:
+            cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
             xy = self.project_to_image_plane(light.pose.pose.position)
             if xy is not None:
-                x, y = xy
-                cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
+                x, y, bb_width = xy
                 image_width = self.config['camera_info']['image_width']
                 image_height = self.config['camera_info']['image_height']
-                crop_size = 299
+                crop_size = bb_width
                 half_crop = int(crop_size/2)
                 if x > image_width - half_crop:
                     x_min = image_width - crop_size
@@ -251,14 +251,18 @@ class TLDetector(object):
                     y_min = max(0, y-half_crop)
                     y_max = min(y_min+crop_size, image_height)
                 cropped = cv_image[y_min:y_max, x_min:x_max]
-                # cv2.rectangle(cv_image, (x-75, y-75), (x+75, y+75), (255, 0 , 0), 2)
-                # cv2.putText(cv_image, 'x: %s, y %s' % (x, y), (100, 560), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
 
                 filename = os.path.abspath("light_classification/training_data/{}-{}.jpg".format(light.state, rospy.Time.now()))
                 with open("light_classification/images.csv", "a") as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow([filename, light.state])
                 cv2.imwrite(filename, cropped)
+
+                # Output full image for debugging
+                # cv2.rectangle(cv_image, (x-bb_width / 2 , y-bb_width / 2), (x+bb_width / 2, y+bb_width / 2), (255, 0 , 0), 2)
+                # cv2.putText(cv_image, 'x: %s, y %s' % (x, y), (100, 560), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 4)
+                # cv2.imwrite(filename, cv_image)
+
                 rospy.loginfo("light image loc: {}, {}".format(x, y))
             return light.state
 
