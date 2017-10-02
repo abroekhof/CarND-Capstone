@@ -171,38 +171,41 @@ class TLDetector(object):
             tl_point.point.y = point_in_world.y
             tl_point.point.z = point_in_world.z
 
-            tl_point = self.listener.transformPoint("/base_link", tl_point)
+            car_point = self.listener.transformPoint("/base_link", tl_point)
 
         except (tf.Exception, tf.LookupException, tf.ConnectivityException):
             rospy.logerr("Failed to find camera to map transform")
             return None
 
-        objectPoints = np.array([tl_point.point.y/tl_point.point.x, tl_point.point.z/tl_point.point.x, 1.0])
+        camera_tilt = - 9. / 180. * math.pi
+        if fx < 10 or fy < 10:
+            fx = 2250
+            fy = 2250
 
-        ################################################################################
-        # Manually tune focal length and camera coordinate for simulator
-        #   for more details about this issue, please reference
-        #   https://discussions.udacity.com/t/focal-length-wrong/358568/22
-        if fx < 10:
-            fx = -2580
-            fy = -2730
-            cx = 360;
-            cy = 700;
-            objectPoints[2]
-        ################################################################################
+        # Car coordinate
+        car_x = car_point.point.x
+        car_y = car_point.point.y
+        car_z = car_point.point.z
 
-        # TODO This can be a class member
-        cameraMatrix = np.array([[fx, 0,  0],
-                                 [0,  fy, 0],
-                                 [0,  0,  1]])
+        # Camera coordinate (note camera is tilted slightly upward)
+        cam_x = math.cos(camera_tilt) * car_x - math.sin(camera_tilt) * car_z
+        cam_y = car_y
+        cam_z = math.sin(camera_tilt) * car_x + math.cos(camera_tilt) * car_z
 
-        imagePoints = cameraMatrix.dot(objectPoints)
-        x = int(round(imagePoints[0]) + cx)
-        y = int(round(imagePoints[1]) + cy)
-        if 10 > x > image_width-10 or 10 > y > image_height-10:
-            return None
-        # rospy.loginfo("objectpoints: x: {}, y: {}, z: {}".format(tl_point.point.x, tl_point.point.y, tl_point.point.z))
-        return (x, y)
+        # Image sensor coordinate
+        img_x = -cam_y
+        img_y = -cam_z
+        img_z = cam_x
+
+        # Pixel coordinate
+        pix_x = int(fx * img_x / img_z + cx - 40)
+        pix_y = int(fy * img_y / img_z + cy)
+
+        # Calculate the bounding box size to encapsulate the traffic light
+        traffic_light_size = 4
+        bb_width = int(math.sqrt(fx*fy) * traffic_light_size / img_z)
+
+        return pix_x, pix_y, bb_width
 
     def get_light_state(self, light):
         """Determines the current color of the traffic light
