@@ -38,13 +38,13 @@ class TwistController(object):
             steer = self.yaw_controller.get_steering(velocity_cmd, angular_velocity_cmd, current_velocity)
             error = velocity_cmd - current_velocity
             sctl = self.pid_controller.step(error, dt)
-            if -self.brake_deadband < sctl < 0.0:
-                # don't apply brake if braking less than brake deadband.
-                throttle = 0.0
-                brake = 0.0
-            elif sctl > 0.0:
+            if sctl > 0.0:
                 # accelerating
                 throttle = sctl
+                brake = 0.0
+            elif -self.brake_deadband < sctl < 0.0:
+                # don't apply brake if braking less than brake deadband.
+                throttle = 0.0
                 brake = 0.0
             else:
                 # decelerating
