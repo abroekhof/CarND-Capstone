@@ -119,7 +119,6 @@ class DBWNode(object):
             distance = math.sqrt( (self.waypoint_position[0] - self.car_position[0])**2 + (self.waypoint_position[1] - self.car_position[1])**2 + (self.waypoint_position[2] - self.car_position[2])**2)
             
             #calculate desired acceleration using equation vf^2 = vi^2 + 2*a*d
-            
             if distance == 0:
                 acceleration = 0.0
             else:
@@ -127,6 +126,7 @@ class DBWNode(object):
                        
             throttle, brake, steering = self.controller.control(self.velocity_cmd, self.current_velocity, acceleration, self.angular_velocity_cmd, dt, self.dbw_enabled)
             if self.dbw_enabled:
+                rospy.loginfo("throttle %f brake %f (vi=%f vf=%f)", throttle, brake, self.current_velocity, self.velocity_cmd)
                 self.publish(throttle, brake, steering)
             rate.sleep()
 
